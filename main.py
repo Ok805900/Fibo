@@ -21,7 +21,6 @@ from config.secrets import Secrets
 from config.settings import PAIRS
 from data.twelvedata_client import TwelveDataClient
 from data.database import Database
-from bot.telegram_bot import FiboBotManager
 from bot.handlers import CommandHandlers
 from scheduler.jobs import SchedulerManager
 from utils.logger import setup_logger
@@ -51,11 +50,11 @@ class FiboBotApplication:
         """Initialiser l'application"""
         self.api_client = None
         self.db = None
-        self.bot_manager = None
         self.scheduler_manager = None
         self.application = None
         self.chat_id = None
         self.flask_thread = None
+        self.running = False
 
     async def initialize(self):
         """Initialiser tous les composants"""
@@ -126,7 +125,7 @@ class FiboBotApplication:
         try:
             port = int(os.getenv("PORT", 10000))
             logger.info(f"🌐 Démarrage serveur Flask sur port {port}")
-            flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+            flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
         except Exception as e:
             logger.error(f"❌ Erreur Flask: {e}", exc_info=True)
 
@@ -149,14 +148,13 @@ class FiboBotApplication:
             logger.info("✅ Scheduler démarré")
 
             # Démarrer le bot Telegram avec la nouvelle API v20+
+            self.running = True
+            logger.info("✅ Application Telegram initialisée")
+            logger.info("✅ Application Telegram démarrée")
+            logger.info("🎯 Démarrage du polling...")
+            
+            # Utiliser run_polling() avec async context manager
             async with self.application:
-                await self.application.initialize()
-                logger.info("✅ Application Telegram initialisée")
-                
-                await self.application.start()
-                logger.info("✅ Application Telegram démarrée")
-
-                # Utiliser run_polling() au lieu de updater.start_polling()
                 await self.application.run_polling(
                     allowed_updates=["message", "callback_query"]
                 )
@@ -169,12 +167,10 @@ class FiboBotApplication:
         """Arrêter le bot"""
         try:
             logger.info("🛑 Arrêt du bot...")
+            self.running = False
 
             if self.scheduler_manager:
                 self.scheduler_manager.stop()
-
-            if self.application:
-                await self.application.stop()
 
             logger.info("✅ Bot arrêté")
 
@@ -185,6 +181,8 @@ class FiboBotApplication:
 async def main():
     """Fonction principale"""
     app = FiboBotApplication()
+    
+    loop = asyncio.get_event_loop()
 
     def signal_handler(sig, frame):
         """Gestionnaire de signaux"""
